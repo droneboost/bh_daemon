@@ -182,24 +182,21 @@ int main()
 
     if (new_pin_value == 0) { // Station mode
       msg_len = mq_receive(q_read, in_str, 1024, NULL);
-      printf("read mq len: %d, content: %s\n", msg_len, in_str);
       if (msg_len > 0) {
-        v = strtok (in_str, ":");
-        while (v != NULL) {
-          settings[i] = v;
-          v = strtok (NULL, ":");
-          i++;
-        }
-      }
-      printf("After split: %s | %s | %s\n", settings[0], settings[1], settings[2]);
-      if (settings[0] != NULL && settings[2] != NULL &&
-          strlen(settings[0]) != 0 && strlen(settings[2]) != 0) {
-        printf("received msg: %s\n", in_str);
-        sprintf(wpa_passphrase_cmd, "wpa_passphrase %s %s >> /etc/wpa_supplicant.conf", settings[0], settings[1]);
-        system(wpa_passphrase_cmd);
-        printf(wpa_passphrase_cmd);
-        system("ifdown wlan0");
-        system("ifup wlan0");
+          v = strtok (in_str, ":");
+          while (v != NULL) {
+              settings[i] = v;
+              v = strtok (NULL, ":");
+              i++;
+          }
+          printf("ssid/psk/encrypt: %s | %s | %s\n", settings[0], settings[1], settings[2]);
+          if (settings[0] != NULL && settings[2] != NULL && strlen(settings[0]) != 0 && strlen(settings[1]) != 0) {
+              sprintf(wpa_passphrase_cmd, "wpa_passphrase %s %s >> /etc/wpa_supplicant.conf", settings[0], settings[1]);
+              system(wpa_passphrase_cmd);
+              printf(wpa_passphrase_cmd);
+              system("ifdown wlan0");
+              system("ifup wlan0");
+          }
       }
     }
     sleep(2);
