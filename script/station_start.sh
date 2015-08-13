@@ -1,10 +1,13 @@
 sudo ifdown wlan0
+killall wpa_supplicant
+sudo service hostapd stop
+sudo service isc-dhcp-server stop
+sudo service hostapd stop
 
-mv -f /etc/network/interfaces /etc/network/interfaces.bak
-cp interfaces.station /etc/network/interfaces 
+cp -f /etc/network/interfaces /etc/network/interfaces.bak
+cp -f config/interfaces.station /etc/network/interfaces
 
-mv -f /etc/wpa_supplicant.conf /etc/wpa_supplicant.conf.bak
-cp wpa_supplicant.conf /etc/wpa_supplicant.conf
-
+cp -f /etc/wpa_supplicant.conf /etc/wpa_supplicant.conf.bak
+cp -f config/wpa_supplicant.conf /etc/wpa_supplicant.conf
 
 sudo ifup wlan0

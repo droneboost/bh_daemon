@@ -53,6 +53,7 @@ void daemonize()
 {
   int i, lfp;
   char str[10];
+
   if(getppid() == 1) return; /* already a daemon */
   i = fork();
   if (i<0) exit(1); /* fork error */
@@ -63,7 +64,7 @@ void daemonize()
   i=open("/dev/null", O_RDWR); dup(i); dup(i); /* handle standart I/O */
   umask(027); /* set newly created file permissions */
   chdir(RUNNING_DIR); /* change running directory */
-  lfp = open(LOCK_FILE,O_RDWR|O_CREAT,0640);
+  lfp = open(LOCK_FILE, O_RDWR|O_CREAT, 0640);
   if (lfp < 0) exit(1); /* can not open */
   if (lockf(lfp, F_TLOCK, 0) < 0) exit(0); /* can not lock */
   /* first instance continues */
@@ -78,25 +79,27 @@ void daemonize()
   //signal(SIGKILL, signal_handler); /* catch kill signal */
 }
 
-//Respberry Pi GPIO memory 
+//Respberry Pi GPIO memory
 //#define BCM2708_PERI_BASE   0x20000000
 #define BCM2708_PERI_BASE   0x3F000000
-#define GPIO_BASE           (BCM2708_PERI_BASE + 0x200000) 
+#define GPIO_BASE           (BCM2708_PERI_BASE + 0x200000) //FIXME: Have to distingush RPI v1 and V2
 #define PAGE_SIZE           (4*1024)
 #define BLOCK_SIZE          (4*1024)
 
 // GPIO setup. Always use INP_GPIO(x) before OUT_GPIO(x) or SET_GPIO_ALT(x,y)
-#define GPIO_MODE_IN(g)     *(gpio+((g)/10)) &= ~(7<<(((g)%10)*3)) 
-#define GPIO_MODE_OUT(g)    *(gpio+((g)/10)) |=  (1<<(((g)%10)*3)) 
+#define GPIO_MODE_IN(g)     *(gpio+((g)/10)) &= ~(7<<(((g)%10)*3))
+#define GPIO_MODE_OUT(g)    *(gpio+((g)/10)) |=  (1<<(((g)%10)*3))
 #define GPIO_MODE_ALT(g,a)  *(gpio+(((g)/10))) |= (((a)<=3?(a)+4:(a)==4?3:2)<<(((g)%10)*3))
-#define GPIO_SET_HIGH       *(gpio+7)  // sets   bits which are 1 
-#define GPIO_SET_LOW        *(gpio+10) // clears bits which are 1 
-#define GPIO_GET(g)         (*(gpio+13)&(1<<g)) // 0 if LOW, (1<<g) if HIGH 
+#define GPIO_SET_HIGH       *(gpio+7)  // sets   bits which are 1
+#define GPIO_SET_LOW        *(gpio+10) // clears bits which are 1
+#define GPIO_GET(g)         (*(gpio+13)&(1<<g)) // 0 if LOW, (1<<g) if HIGH
 
-#define RPI_GPIO_22   22   // Pin 15 
-#define RPI_GPIO_24   24   // Pin 18 
+#define RPI_GPIO_22   22   // Pin 15
+#define RPI_GPIO_24   24   // Pin 18
 
 volatile uint32_t *gpio;
+#define MSG_QUEEN_NAME "/request_send_queue"
+static mqd_t q_read;
 
 void get_gpio_address()
 {
@@ -130,20 +133,54 @@ void get_gpio_address()
   gpio = (volatile uint32_t *)gpio_map; // Always use volatile pointer!
 }
 
-#define MSG_QUEEN_NAME "/request_send_queue"
-static mqd_t q_read;
+void set_wifi_setting()
+{
+  int msg_len = 0;
+  int i = 0;
+  char* v = NULL;
+  char* params[3] = {NULL}; //0: ssid, 1: encrypt, 2: key
+  char wpa_passphrase_cmd[256] = {0};
+  char req[1024] = {0};
+
+  msg_len = mq_receive(q_read, req, 1024, NULL);
+  if (msg_len > 0) {
+      printf("Set wifi setting\n");
+      v = strtok (req, ":");
+      while (v != NULL) {
+          params[i] = v;
+          v = strtok (NULL, ":");
+          i++;
+      }
+      printf("ssid/encrypt/psk: %s | %s | %s\n", params[0], params[1], params[2]);
+      if (params[0] != NULL && params[2] != NULL && strlen(params[0]) != 0 && strlen(params[2]) != 0) {
+          sprintf(wpa_passphrase_cmd, "wpa_passphrase %s %s >> /etc/wpa_supplicant.conf", params[0], params[2]);
+          system(wpa_passphrase_cmd);
+          printf(wpa_passphrase_cmd);
+          system("ifdown wlan0");
+          system("ifup wlan0");
+      }
+  }
+}
+
+void launch_station_mode()
+{
+  printf("Station mode\n");
+  system("sh script/station_start.sh");
+}
+
+void launch_softap_mode()
+{
+  printf("SoftAP mode\n");
+  system("sh script/softap_start.sh");
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int main()
 {
   static uint32_t old_pin_value  = 0;
   uint32_t new_pin_value  = 0;
   char status[64] = {0};
-  char in_str[1024] = {0};
-  char wpa_passphrase_cmd[256] = {0};
   struct mq_attr mqattr;
-  char* v = NULL;
-  char* settings[3] = {NULL}; //0: ssid, 1: encrypt, 2: key
-  int msg_len = 0;
-  int i = 0;
 
   mqattr.mq_maxmsg = 10;
   mqattr.mq_msgsize = 1024;
@@ -155,51 +192,31 @@ int main()
   GPIO_MODE_IN(RPI_GPIO_24);
 
   //daemonize();
+  signal(SIGTERM, signal_handler); /* catch term signal */
   while(1) {
-    memset(in_str, 0, 1024);
-    settings[0] = settings[1] = settings[2] = NULL;
     new_pin_value = GPIO_GET(RPI_GPIO_24);
+    printf("wifi config pin value: %d\n", new_pin_value);
     if (new_pin_value != old_pin_value) {
-      sprintf(status, "SoftAP pin value is %d\n", new_pin_value);
       //log_message(LOG_FILE, status);
-      printf(status);
 
       if (new_pin_value) {
         //log_message(LOG_FILE, "SoftAP mode");
-        printf("SoftAP mode\n");
-        //system("sh station_stop.sh");
-        //system("sh softap_start.sh");
+        launch_softap_mode();
       } else {
         //log_message(LOG_FILE, "Station mode");
-        printf("Station mode\n");
-        //system("sh softap_stop.sh");
-        //system("sh station_start.sh");
+        launch_station_mode();
       }
+
       old_pin_value = new_pin_value;
     } else {
        printf("No pin change\n");
     }
 
-    if (new_pin_value == 0) { // Station mode
-      msg_len = mq_receive(q_read, in_str, 1024, NULL);
-      if (msg_len > 0) {
-          v = strtok (in_str, ":");
-          while (v != NULL) {
-              settings[i] = v;
-              v = strtok (NULL, ":");
-              i++;
-          }
-          printf("ssid/psk/encrypt: %s | %s | %s\n", settings[0], settings[1], settings[2]);
-          if (settings[0] != NULL && settings[2] != NULL && strlen(settings[0]) != 0 && strlen(settings[1]) != 0) {
-              sprintf(wpa_passphrase_cmd, "wpa_passphrase %s %s >> /etc/wpa_supplicant.conf", settings[0], settings[1]);
-              system(wpa_passphrase_cmd);
-              printf(wpa_passphrase_cmd);
-              system("ifdown wlan0");
-              system("ifup wlan0");
-          }
-      }
+    if (new_pin_value == 0) {
+      set_wifi_setting();
     }
-    sleep(2);
+
+    sleep(3);
   }
 
   return 0;
