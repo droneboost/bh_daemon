@@ -25,6 +25,31 @@ To terminate:kill `cat /tmp/exampled.lock`
 #define LOCK_FILE   "exampled.lock"
 #define LOG_FILE    "exampled.log"
 
+//Respberry Pi GPIO memory
+//#define BCM2708_PERI_BASE   0x20000000
+#define BCM2708_PERI_BASE   0x3F000000
+#define GPIO_BASE           (BCM2708_PERI_BASE + 0x200000) //FIXME: Have to distingush RPI v1 and V2
+#define PAGE_SIZE           (4*1024)
+#define BLOCK_SIZE          (4*1024)
+
+// GPIO setup. Always use INP_GPIO(x) before OUT_GPIO(x) or SET_GPIO_ALT(x,y)
+#define GPIO_MODE_IN(g)     *(gpio+((g)/10)) &= ~(7<<(((g)%10)*3))
+#define GPIO_MODE_OUT(g)    *(gpio+((g)/10)) |=  (1<<(((g)%10)*3))
+#define GPIO_MODE_ALT(g,a)  *(gpio+(((g)/10))) |= (((a)<=3?(a)+4:(a)==4?3:2)<<(((g)%10)*3))
+#define GPIO_SET_HIGH       *(gpio+7)  // sets   bits which are 1
+#define GPIO_SET_LOW        *(gpio+10) // clears bits which are 1
+#define GPIO_GET(g)         (*(gpio+13)&(1<<g)) // 0 if LOW, (1<<g) if HIGH
+
+#define RPI_GPIO_22   22   // Pin 15
+#define RPI_GPIO_24   24   // Pin 18
+
+#define L2W_MSG_QUEUE "/l2w_msg_queue"
+#define W2L_MSG_QUEUE "/w2l_msg_queue"
+
+volatile uint32_t *gpio;
+static mqd_t l2w_qhd;
+static mqd_t w2l_qhd;
+
 void log_message(char* filename, char* message)
 {
   FILE *logfile = NULL;
@@ -44,6 +69,8 @@ void signal_handler(int sig)
     //case SIGKILL:
     log_message(LOG_FILE, "terminate signal catched");
     //unlink(LOG_FILE);
+    mq_close(l2w_qhd);
+    mq_close(w2l_qhd);
     exit(0);
     break;
   }
@@ -79,28 +106,6 @@ void daemonize()
   //signal(SIGKILL, signal_handler); /* catch kill signal */
 }
 
-//Respberry Pi GPIO memory
-//#define BCM2708_PERI_BASE   0x20000000
-#define BCM2708_PERI_BASE   0x3F000000
-#define GPIO_BASE           (BCM2708_PERI_BASE + 0x200000) //FIXME: Have to distingush RPI v1 and V2
-#define PAGE_SIZE           (4*1024)
-#define BLOCK_SIZE          (4*1024)
-
-// GPIO setup. Always use INP_GPIO(x) before OUT_GPIO(x) or SET_GPIO_ALT(x,y)
-#define GPIO_MODE_IN(g)     *(gpio+((g)/10)) &= ~(7<<(((g)%10)*3))
-#define GPIO_MODE_OUT(g)    *(gpio+((g)/10)) |=  (1<<(((g)%10)*3))
-#define GPIO_MODE_ALT(g,a)  *(gpio+(((g)/10))) |= (((a)<=3?(a)+4:(a)==4?3:2)<<(((g)%10)*3))
-#define GPIO_SET_HIGH       *(gpio+7)  // sets   bits which are 1
-#define GPIO_SET_LOW        *(gpio+10) // clears bits which are 1
-#define GPIO_GET(g)         (*(gpio+13)&(1<<g)) // 0 if LOW, (1<<g) if HIGH
-
-#define RPI_GPIO_22   22   // Pin 15
-#define RPI_GPIO_24   24   // Pin 18
-
-volatile uint32_t *gpio;
-#define MSG_QUEEN_NAME "/request_send_queue"
-static mqd_t q_read;
-
 void get_gpio_address()
 {
   int mem_fd;
@@ -133,7 +138,7 @@ void get_gpio_address()
   gpio = (volatile uint32_t *)gpio_map; // Always use volatile pointer!
 }
 
-void set_wifi_setting()
+void check_set_wifi_setting(int pin_value)
 {
   int msg_len = 0;
   int i = 0;
@@ -142,22 +147,28 @@ void set_wifi_setting()
   char wpa_passphrase_cmd[256] = {0};
   char req[1024] = {0};
 
-  msg_len = mq_receive(q_read, req, 1024, NULL);
+  msg_len = mq_receive(l2w_qhd, req, 1024, NULL);
   if (msg_len > 0) {
-      printf("Set wifi setting\n");
-      v = strtok (req, ":");
-      while (v != NULL) {
-          params[i] = v;
-          v = strtok (NULL, ":");
-          i++;
+      if (0 == pin_value) {
+          mq_send(w2l_qhd, "station", strlen("station"), 1);
+          printf("Set wifi setting\n");
+          v = strtok (req, ":");
+          while (v != NULL) {
+              params[i] = v;
+              v = strtok (NULL, ":");
+              i++;
+          }
+          printf("ssid/encrypt/psk: %s | %s | %s\n", params[0], params[1], params[2]);
+          if (params[0] != NULL && params[2] != NULL && strlen(params[0]) != 0 && strlen(params[2]) != 0) {
+              sprintf(wpa_passphrase_cmd, "wpa_passphrase %s %s >> /etc/wpa_supplicant.conf", params[0], params[2]);
+              system(wpa_passphrase_cmd);
+              printf(wpa_passphrase_cmd);
+              system("ifdown wlan0");
+              system("ifup wlan0");
+          }
       }
-      printf("ssid/encrypt/psk: %s | %s | %s\n", params[0], params[1], params[2]);
-      if (params[0] != NULL && params[2] != NULL && strlen(params[0]) != 0 && strlen(params[2]) != 0) {
-          sprintf(wpa_passphrase_cmd, "wpa_passphrase %s %s >> /etc/wpa_supplicant.conf", params[0], params[2]);
-          system(wpa_passphrase_cmd);
-          printf(wpa_passphrase_cmd);
-          system("ifdown wlan0");
-          system("ifup wlan0");
+      else {
+          mq_send(w2l_qhd, "softap", strlen("softap"), 1);
       }
   }
 }
@@ -184,7 +195,8 @@ int main()
 
   mqattr.mq_maxmsg = 10;
   mqattr.mq_msgsize = 1024;
-  q_read = mq_open(MSG_QUEEN_NAME, O_RDONLY | O_NONBLOCK | O_CREAT, S_IRUSR | S_IWUSR, &mqattr);
+  l2w_qhd = mq_open(L2W_MSG_QUEUE, O_RDONLY | O_NONBLOCK | O_CREAT, S_IRUSR | S_IWUSR, &mqattr);
+  w2l_qhd = mq_open(W2L_MSG_QUEUE, O_WRONLY | O_NONBLOCK | O_CREAT, S_IRUSR | S_IWUSR, &mqattr);
 
   //unlink(RUNNING_DIR);
   system("mkdir -p /opt/apm_launcher");
@@ -196,6 +208,8 @@ int main()
   while(1) {
     new_pin_value = GPIO_GET(RPI_GPIO_24);
     printf("wifi config pin value: %d\n", new_pin_value);
+    check_set_wifi_setting(new_pin_value); // check wifi setting request
+
     if (new_pin_value != old_pin_value) {
       //log_message(LOG_FILE, status);
 
@@ -210,10 +224,6 @@ int main()
       old_pin_value = new_pin_value;
     } else {
        printf("No pin change\n");
-    }
-
-    if (new_pin_value == 0) {
-      set_wifi_setting();
     }
 
     sleep(3);
