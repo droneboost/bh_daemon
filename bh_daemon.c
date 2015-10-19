@@ -120,11 +120,11 @@ void get_gpio_address()
   // mmap GPIO
   void *gpio_map = mmap(
                    NULL,                 // Any adddress in our space will do
-	           BLOCK_SIZE,           // Map length
+    	           BLOCK_SIZE,           // Map length
                    PROT_READ|PROT_WRITE, // Enable reading & writting to mapped memory
                    MAP_SHARED,           // Shared with other processes
                    mem_fd,               // File to map
-	           GPIO_BASE             // Offset to GPIO peripheral
+	               GPIO_BASE             // Offset to GPIO peripheral
 		  );
 
   close(mem_fd); // No need to keep mem_fd open after mmap

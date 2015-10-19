@@ -1,14 +1,11 @@
-TARGET = wifi_daemon
-OBJ = wifi_daemon.o
+TARGET = bh_daemon
+OBJ = bh_daemon.o
 
 LINKFLAGS += \
     -lpthread \
     -lrt
 
-#INCLUDES = -I../../../../../../mtk/release/BDP_Generic/build/sysroot/usr/include
-#           $(BDP_GENERIC_DIR)/build/sysroot/usr/include
-
-
+#INCLUDES = -I../
 
 .PHONY : default
 
@@ -16,7 +13,7 @@ default:$(TARGET)
 
 $(OBJ) : $(SRC)
 
-$(TARGET) : $(OBJ) 
+$(TARGET) : $(OBJ)
 	$(CXX) $(CXXFLAGS) $(CFLAGS) $(INCLUDES) $^ $(LINKFLAGS)  -o $@
 
 #	$(CXX) $(CXXFLAGS) -o $@ ${OBJECT} ${LIBDIR} $(LINKFLAGS)
@@ -25,9 +22,9 @@ $(TARGET) : $(OBJ)
 	$(CXX) ${CXXFLAGS} -c $< ${INCLUDES}
 
 clean:
-	-rm -f wifi_daemon wifi_daemon.o
+	-rm -f bh_daemon bh_daemon.o
 
-wifi_daemon.o: wifi_daemon.c 
+bh_daemon.o: bh_daemon.c
 
 
 
