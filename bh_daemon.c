@@ -226,7 +226,7 @@ int main()
        printf("No pin change\n");
     }
 
-    sleep(3);
+    sleep(2);
   }
 
   return 0;
