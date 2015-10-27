@@ -1,8 +1,9 @@
 #this script enable station mode for bithollow
 #TODO: replace service with systemctl
 sudo ifdown wlan0
-killall wpa_supplicant
-sudo service hostapd stop
+#sudo ifconfig wlan0 down
+sudo killall wpa_supplicant
+sudo killall hostapd
 sudo service isc-dhcp-server stop
 sudo service lighttpd stop
 

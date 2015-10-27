@@ -149,7 +149,7 @@ void check_set_wifi_setting(int pin_value)
 
   msg_len = mq_receive(l2w_qhd, req, 1024, NULL);
   if (msg_len > 0) {
-      if (0 == pin_value) {
+      if (1 == pin_value) {
           mq_send(w2l_qhd, "station", strlen("station"), 1);
           printf("Set wifi setting\n");
           v = strtok (req, ":");
@@ -189,6 +189,8 @@ void launch_softap_mode()
 int main()
 {
   static uint32_t old_pin_value  = 0;
+  static uint32_t first_boot = 1;
+
   uint32_t new_pin_value  = 0;
   char status[64] = {0};
   struct mq_attr mqattr;
@@ -210,10 +212,11 @@ int main()
     printf("wifi config pin value: %d\n", new_pin_value);
     check_set_wifi_setting(new_pin_value); // check wifi setting request
 
-    if (new_pin_value != old_pin_value) {
+    if (first_boot == 1 || new_pin_value != old_pin_value) {
       //log_message(LOG_FILE, status);
+      first_boot = 0;
 
-      if (new_pin_value) {
+      if (new_pin_value == 0) {
         //log_message(LOG_FILE, "SoftAP mode");
         launch_softap_mode();
       } else {
